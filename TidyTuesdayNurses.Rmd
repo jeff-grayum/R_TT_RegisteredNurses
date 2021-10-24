@@ -1,0 +1,180 @@
+---
+title: "RegisteredNurses"
+author: "Jeff Grayum"
+date: "10/20/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Loading libraries
+```{r}
+library(tidyverse)
+library(tidytuesdayR)
+library(scales)
+library(ggthemes)
+library(janitor)
+library(mapproj)
+```
+
+Loading data
+```{r}
+tuesdata <- tidytuesdayR::tt_load('2021-10-05') %>%
+  clean_names()
+  
+```
+
+```{r}
+nurses <- tuesdata$nurses %>%
+  clean_names()
+```
+
+My own analysis, before watching the video.
+```{r}
+nurses %>%
+  summary()
+
+nurses %>%
+  filter(year == 2020) %>%
+  arrange(desc(annual_salary_avg)) %>%
+  head(10) %>%
+  mutate(state = fct_reorder(state, annual_salary_avg)) %>%
+  ggplot(aes(annual_salary_avg, state, fill = state)) +
+  geom_col() +
+  labs(x = "Salary",
+       y = "",
+       title = "Highest paid nurses in the US in 2020") +
+  theme_few() +
+  theme(legend.position = "none")
+
+highest_paying <- nurses %>%
+  filter(year == 2020) %>%
+  arrange(desc(annual_salary_avg)) %>%
+  head(20) %>%
+  pull(state)
+
+nurses %>%
+  filter(state %in% highest_paying) %>%
+  mutate(state = fct_reorder(state, -annual_salary_avg, sum)) %>%
+  ggplot(aes(year, annual_salary_avg, color = state)) +
+  geom_line(size = 1) +
+  labs(x = "Year",
+       y = "Mean annual salary",
+       size = "Total employed",
+       color = "State",
+       title = "States with highest mean annual salary for RN's") +
+  theme_hc()
+
+nurses %>%
+  filter(state %in% highest_paying) %>%
+  mutate(state = fct_reorder(state, annual_salary_avg)) %>%
+  ggplot(aes(annual_salary_avg, state, group = state)) +
+  geom_boxplot() +
+  labs(x = "Annual salary",
+       y = "",
+       title = "RN salary ranges since 1998") +
+  theme_hc()
+```
+
+OK, David's screencast.
+```{r}
+nurses %>%
+  count(year, wt = total_employed_rn) %>%
+  ggplot(aes(year, n)) +
+  geom_col() +
+  labs(x = "Year",
+       y = "Total employed RN's",
+       title = "Total employed nurses each year") +
+  scale_y_continuous(labels = comma) +
+  theme_tufte()
+
+nurses %>%
+  filter(state == "New York") %>%
+  ggplot(aes(year, total_employed_rn)) +
+  geom_col() +
+  labs(x = "Year",
+       y = "Total employed RN's",
+       title = "Total employed nurses each year in New York") +
+  scale_y_continuous(labels = comma) +
+  theme_tufte()
+
+nurses %>%
+  filter(state %in% c("New York", "California", "Mississippi", "Missouri", "Arizona", "Texas")) %>%
+  mutate(state = fct_reorder(state, -total_employed_rn, sum)) %>%
+  ggplot(aes(year, total_employed_rn, color = state)) +
+  geom_line() +
+  labs(x = "Year",
+       y = "Total employed RNs",
+       title = "Total employed nurses each year in several states",
+       color = "State") +
+  scale_y_continuous(labels = comma) +
+  theme_tufte() +
+  expand_limits(y = 0)
+
+
+nurses %>%
+    filter(state %in% c("New York", "California", "Mississippi", "Missouri", "Arizona", "Texas")) %>%
+  mutate(state = fct_reorder(state, -hourly_wage_median)) %>%
+  ggplot(aes(year, hourly_wage_median, color = state)) +
+  geom_line() +
+  labs(x = "Year",
+       y = "Hourly wage",
+       title = "Total employed nurses each year in several states",
+       color = "State") +
+  scale_y_continuous(labels = dollar_format()) +
+  theme_tufte() +
+  expand_limits(y = 0)
+
+nurses %>%
+  filter(!is.na(hourly_wage_avg)) %>%
+  group_by(year) %>%
+  summarize(weighted_avg_wage = sum(hourly_wage_avg * total_employed_rn) / sum(total_employed_rn)) %>%
+  filter(!is.na(weighted_avg_wage)) %>%
+  ggplot(aes(year, weighted_avg_wage)) +
+  geom_line() + 
+  geom_point() +
+  labs(x = "Year",
+       y = "Weighted average wage",
+       title = "Average hourly wage (weighted) of US nurses") +
+  scale_y_continuous(labels = dollar_format()) +
+  expand_limits(y = 0) +
+  theme_tufte()
+
+nurses %>%
+  filter(year %in% c(2000, 2020)) %>%
+  select(state, year, total_employed_rn, hourly_wage_median) %>%
+  pivot_wider(names_from = year, values_from = c(total_employed_rn, hourly_wage_median)) %>%
+  mutate(rn_increase = total_employed_rn_2020 / total_employed_rn_2000 - 1,
+         wage_increase = hourly_wage_median_2020 / hourly_wage_median_2000 -1) %>%
+  ggplot(aes(rn_increase, wage_increase)) +
+  geom_point(aes(size = total_employed_rn_2000)) +
+  geom_text(aes(label = state), vjust = 1, hjust = 1, check_overlap = TRUE) +
+  scale_x_continuous(labels = percent_format()) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(x = "% increase in # of registerd nurses", 
+       y = "% increase in hourly wage",
+       size = "Total employed in 2000") +
+  theme_few()
+```
+
+Let's make a choropleth!
+```{r}
+nurses %>%
+  filter(year == 2020) %>%
+  mutate(state = str_to_lower(state)) %>%
+  inner_join(map_data("state"), by = c(state = "region")) %>%
+  ggplot(aes(long, lat, group = group, fill = hourly_wage_median)) +
+  geom_polygon() +
+  coord_map() +
+  theme_map() +
+  scale_fill_viridis_c(labels = dollar_format()) +
+  labs(title = "Hourly wage of registered nurses by state, 2020",
+       fill = "Median wage") +
+  theme(legend.position = "right")
+
+```
+
